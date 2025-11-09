@@ -4,9 +4,7 @@ This project provides a tool for looking up genetic variants in [MaveDB](https:/
 
 The HGVS search is reference-independent, to the same extent as ClinGen Allele Registry searches.
 
-However, only data about the requested variant are returned; related protein or DNA variants are not considered. Thus, if a DNA variant is requested, only MAVE scores describing the same DNA variant are returned, even if MAVE scores exist that describe the variant's protein consequence or other DNA variants that are coding-equivalent. Similarly, if a protein variant is requested, MAVE scores describing DNA variants that produce the specified protein change are not returned. In the future, we may add an option to include data about related variants.
-
-Multi-variants (including haplotypes) are not currently supported by this project, but the MaveDB website's search capabilities do support multi-variants.
+One row is returned for each variant measurement matching one of the searches. The row includes information about the variant, the individual measurement, and the score set to which it belongs. In addition, if the score set containing a measurement has a primary calibration that is not marked "research use only," the row includes details of the score range into which the variant falls, as well as OddsPath and ACMG evidence strength if available.
 
 ## Project Structure
 
@@ -74,6 +72,12 @@ python src/mavedb_lookup.py <input_file.csv> <output_file.csv>
 
 - `<input_file.csv>`: Path to the input CSV file with a column named `hgvs`.
 - `<output_file.csv>`: Path where the output CSV file will be saved.
+
+## Limitations
+
+Only data about the requested variant are returned; related protein or DNA variants are not considered. Thus, if a DNA variant is requested, only MAVE scores describing the same DNA variant are returned, even if MAVE scores exist that describe the variant's protein consequence or other DNA variants that are coding-equivalent. Similarly, if a protein variant is requested, MAVE scores describing DNA variants that produce the specified protein change are not returned. In the future, we may add an option to include data about related variants.
+
+Multi-variants (including haplotypes) are not currently supported, but the MaveDB website's search capabilities allow searching for multi-variants.
 
 ## Output
 

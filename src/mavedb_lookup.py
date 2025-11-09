@@ -42,11 +42,12 @@ def main(input_csv: str, output_csv: str):
     with open(input_csv, mode='r') as infile:
         reader = csv.DictReader(infile)
 
-    
         for row in reader:
             hgvs = row['hgvs']
+
             clingen_alleles = clingen_client.fetch_clingen_allele(hgvs)
             clingen_allele_ids = clingen_client.get_exact_match_clingen_allele_ids(clingen_alleles)
+
             if (not clingen_allele_ids):
                 raise(Exception(f"No allele ID for {hgvs}"))
             for clingen_allele_id in clingen_allele_ids:
@@ -80,15 +81,20 @@ def main(input_csv: str, output_csv: str):
                     acmg_evidence_strength: str | None = None
                     calibration_source_db: str | None = None
                     calibration_source_identifier: str | None = None
-                    odds_path_source_db: str | None = None
-                    odds_path_source_identifier: str | None = None
+                    evidence_strength_source_db: str | None = None
+                    evidence_strength_source_identifier: str | None = None
 
                     if score is not None:
                         # TODO The data model for calibrations will change in MaveDB v2025.5.0.
                         calibrations = score_set.get("scoreRanges")
+
+                        # Get the primary calibration. MaveDB v2025.5.0 will tell us which one is primary, but for now
+                        # we prioritize Scott, CVFG (all variants), and investigator-provided calibrations, in that
+                        # order. If a primary calibration is flagged for research use only, ignore it.
                         primary_calibration = calibrations.get("scottCalibration", calibrations.get("cvfgAllVariants", calibrations.get("investigatorProvided", None)))
                         if primary_calibration.get("researchUseOnly", False):
                             primary_calibration = None
+
                         if primary_calibration:
                             for range in primary_calibration.get("ranges", []):
                                 if score_lies_in_range(score, range):

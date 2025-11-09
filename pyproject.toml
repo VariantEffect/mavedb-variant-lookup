@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "mavedb-variant-lookup"
+version = "0.1.0"
+description = "A project to look up genetic variants in MaveDB and classify them based on score sets."
+authors = ["Your Name <youremail@example.com>"]
+license = "MIT"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.25.1"
+pandas = "^1.2.3"
+click = "^8.3.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

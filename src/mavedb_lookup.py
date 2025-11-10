@@ -1,11 +1,54 @@
 import csv
 import json
-from typing import Any, cast
+from typing import Any, cast, NotRequired, TypedDict
 
 import click
 
 from clingen_client import ClingenClient
 from mavedb_client import MaveDBClient
+
+
+class Keyword(TypedDict):
+    key: str
+    label: NotRequired[str]
+    system: NotRequired[str]
+    code: NotRequired[str]
+    version: NotRequired[str]
+
+
+class ExperimentKeyword(TypedDict):
+    keyword: Keyword
+    description: NotRequired[str]  # Additional details, e.g. for when the keyword is 'Other'
+
+
+def can_detect_nmd_variants(score_set_urn: str, experiment_variant_library_creation_method: ExperimentKeyword | None) -> bool | None:
+    """
+    Can an experiment detect NMD variants?
+
+    This is currently determined by looking at the library creation method, but there are two exceptions.
+    """
+    if experiment_variant_library_creation_method is None:
+        return None
+    if experiment_variant_library_creation_method .get("keyword", {}).get("label", None) == "Endogenous locus library method":
+        return not score_set_urn.startswith("urn:mavedb:00001242")
+    return score_set_urn.startswith("urn:mavedb:00001226")
+
+
+def can_detect_splicing_variants(score_set_urn: str, experiment_variant_library_creation_method: ExperimentKeyword | None) -> bool | None:
+    """
+    Can an experiment detect splicing variants?
+
+    This is currently determined by looking at the library creation method, but there is one exception.
+    """
+    if experiment_variant_library_creation_method is None:
+        return None
+    if experiment_variant_library_creation_method .get("keyword", {}).get("label", None) == "Endogenous locus library method":
+        return True
+    return score_set_urn.startswith("urn:mavedb:00001226")
+
+
+def find_keyword(experiment_keywords: list[ExperimentKeyword], key: str):
+    return next((keyword for keyword in experiment_keywords if keyword.get("keyword", {}).get("key", None) == key), None)
 
 
 def score_lies_in_range(score: float, range: Any):
@@ -37,7 +80,7 @@ def score_lies_in_range(score: float, range: Any):
 def main(input_csv: str, output_csv: str):
     clingen_client = ClingenClient()
     mavedb_client = MaveDBClient()
-    results = []
+    results: list[dict[str, Any]] = []
 
     with open(input_csv, mode='r') as infile:
         reader = csv.DictReader(infile)
@@ -65,6 +108,10 @@ def main(input_csv: str, output_csv: str):
                     if score_set is None:
                         raise(Exception(f"Missing score set for variant {hgvs} (URN {variant_urn})."))
 
+                    experiment = score_set.get("experiment")
+                    if experiment is None:
+                        raise(Exception(f"Missing experiment for variant {hgvs} (URN {variant_urn})."))
+
                     primary_publications = score_set.get("primaryPublicationIdentifiers", [])
                     primary_publication = primary_publications[0] if primary_publications else None
                     variant_effect_measurement_source_db = cast(str | None, primary_publication.get("dbName", None)) if primary_publication else None
@@ -75,8 +122,28 @@ def main(input_csv: str, output_csv: str):
                     variant_effect_measurement_source_publication_year = cast(int | None, primary_publication.get("publicationYear", None)) if primary_publication else None
                     variant_effect_measurement_source_publication_journal = cast(str | None, primary_publication.get("publicationJournal", None)) if primary_publication else None
 
+                    experiment_keywords = experiment.get("keywords", [])
+                    experiment_variant_library_creation_method = find_keyword(experiment_keywords, "Variant Library Creation Method")
+                    experiment_endogenous_locus_library_method_system = find_keyword(experiment_keywords, "Endogenous Locus Library Method System")
+                    experiment_endogenous_locus_library_method_mechanism = find_keyword(experiment_keywords, "Endogenous Locus Library Method Mechanism")
+                    experiment_in_vitro_construct_library_method_system = find_keyword(experiment_keywords, "In Vitro Construct Library Method System")
+                    experiment_in_vitro_construct_library_method_mechanism = find_keyword(experiment_keywords, "In Vitro Construct Library Method Mechanism")
+                    experiment_delivery_method = find_keyword(experiment_keywords, "Delivery method")
+                    experiment_phenotypic_assay_dimensionality = find_keyword(experiment_keywords, "Phenotypic Assay Dimensionality")
+                    experiment_phenotypic_assay_method = find_keyword(experiment_keywords, "Phenotypic Assay Method")
+                    experiment_phentypic_assay_mechanism = find_keyword(experiment_keywords, "Phenotypic Assay Mechanism")
+                    experiment_molecular_mechanism_assessed = find_keyword(experiment_keywords, "Molecular Mechanism Assessed")
+                    experiment_phenotypic_assay_model_system = find_keyword(experiment_keywords, "Phenotypic Assay Model System")
+                    experiment_phenotypic_assay_profiling_strategy = find_keyword(experiment_keywords, "Phenotypic Assay Profiling Strategy")
+                    experiment_phenotypic_assay_sequencing_read_type = find_keyword(experiment_keywords, "Phenotypic Assay Sequencing Read Type")
+
+                    experiment_detects_nmd_variants = can_detect_nmd_variants(score_set_urn, experiment_variant_library_creation_method)
+                    experiment_detects_splicing_variants = can_detect_splicing_variants(score_set_urn, experiment_variant_library_creation_method)
+
                     score_range_label: str | None = None
                     score_range_classification: str | None = None
+                    score_range_min: float | None = None
+                    score_range_max: float | None = None
                     odds_path: float | None = None
                     acmg_evidence_strength: str | None = None
                     calibration_source_db: str | None = None
@@ -100,6 +167,8 @@ def main(input_csv: str, output_csv: str):
                                 if score_lies_in_range(score, range):
                                     score_range_label = cast(str | None, range.get("label", None))
                                     score_range_classification = cast(str | None, range.get("classification", None))
+                                    score_range_min = cast(float | None, range.get("range", [None, None])[0])
+                                    score_range_max = cast(float | None, range.get("range", [None, None])[1])
                                     odds_path = cast(float | None, range.get("oddsPath", {}).get("ratio", None))
                                     acmg_evidence_strength = cast(str | None, range.get("oddsPath", {}).get("evidence", None))
                                     calibration_sources = primary_calibration.get("source", [])
@@ -115,15 +184,19 @@ def main(input_csv: str, output_csv: str):
                         results.append({
                             "hgvs": hgvs,
                             "clingen_allele_id": clingen_allele_id,
-                            "mavedb_variant_urn": variant_urn,
-                            "mavedb_score_set_urn": score_set_urn,
+                            "variant_urn": variant_urn,
+
                             "score": score,
                             "score_data": json.dumps(score_data),
                             "count_data": json.dumps(count_data) if count_data else None,
+
                             "score_range_label": score_range_label,
                             "score_range_classification": score_range_classification,
+                            "score_range_min": score_range_min,
+                            "score_range_max": score_range_max,
                             "odds_path": odds_path,
                             "acmg_evidence_strength": acmg_evidence_strength,
+
                             "variant_effect_measurement_source_db": variant_effect_measurement_source_db,
                             "variant_effect_measurement_source_identifier": variant_effect_measurement_source_identifier,
                             "variant_effect_measurement_source_first_author": variant_effect_measurement_source_first_author_name,
@@ -133,21 +206,64 @@ def main(input_csv: str, output_csv: str):
                             "calibration_source_identifier": calibration_source_identifier,
                             "evidence_strength_source_db": evidence_strength_source_db,
                             "evidence_strength_source_identifier": evidence_strength_source_identifier,
+
+                            "score_set_urn": score_set_urn,
+                            "score_set_title": score_set.get("title", None),
+                            "score_set_short_description": score_set.get("shortDescription", None),
+                            "score_set_published_date": score_set.get("publishedDate", None),
+
+                            "experiment_urn": experiment.get("urn", None),
+                            "experiment_title": experiment.get("title", None),
+                            "experiment_short_description": experiment.get("shortDescription", None),
+
+                            # Controlled keywords
+                            "experiment_variant_library_creation_method_label": experiment_variant_library_creation_method.get("keyword", {}).get("label", None) if experiment_variant_library_creation_method else None,
+                            "experiment_variant_library_creation_method_description": experiment_variant_library_creation_method.get("description", None) if experiment_variant_library_creation_method else None,
+                            "experiment_endogenous_locus_library_method_system_label": experiment_endogenous_locus_library_method_system.get("keyword", {}).get("label", None) if experiment_endogenous_locus_library_method_system else None,
+                            "experiment_endogenous_locus_library_method_system_description": experiment_endogenous_locus_library_method_system.get("description", None) if experiment_endogenous_locus_library_method_system else None,
+                            "experiment_endogenous_locus_library_method_mechanism_label": experiment_endogenous_locus_library_method_mechanism.get("keyword", {}).get("label", None) if experiment_endogenous_locus_library_method_mechanism else None,
+                            "experiment_endogenous_locus_library_method_mechanism_description": experiment_endogenous_locus_library_method_mechanism.get("description", None) if experiment_endogenous_locus_library_method_mechanism else None,
+                            "experiment_in_vitro_construct_library_method_system_label": experiment_in_vitro_construct_library_method_system.get("keyword", {}).get("label", None) if experiment_in_vitro_construct_library_method_system else None,
+                            "experiment_in_vitro_construct_library_method_system_description": experiment_in_vitro_construct_library_method_system.get("description", None) if experiment_in_vitro_construct_library_method_system else None,
+                            "experiment_in_vitro_construct_library_method_mechanism_label": experiment_in_vitro_construct_library_method_mechanism.get("keyword", {}).get("label", None) if experiment_in_vitro_construct_library_method_mechanism else None,
+                            "experiment_in_vitro_construct_library_method_mechanism_description": experiment_in_vitro_construct_library_method_mechanism.get("description", None) if experiment_in_vitro_construct_library_method_mechanism else None,
+                            "experiment_delivery_method_label": experiment_delivery_method.get("keyword", {}).get("label", None) if experiment_delivery_method else None,
+                            "experiment_delivery_method_description": experiment_delivery_method.get("description", None) if experiment_delivery_method else None,
+                            "experiment_phenotypic_assay_dimensionality_label": experiment_phenotypic_assay_dimensionality.get("keyword", {}).get("label", None) if experiment_phenotypic_assay_dimensionality else None,
+                            "experiment_phenotypic_assay_dimensionality_description": experiment_phenotypic_assay_dimensionality.get("description", None) if experiment_phenotypic_assay_dimensionality else None,
+                            "experiment_phenotypic_assay_method_label": experiment_phenotypic_assay_method.get("keyword", {}).get("label", None) if experiment_phenotypic_assay_method else None,
+                            "experiment_phenotypic_assay_method_description": experiment_phenotypic_assay_method.get("description", None) if experiment_phenotypic_assay_method else None,
+                            "experiment_phentypic_assay_mechanism_label": experiment_phentypic_assay_mechanism.get("keyword", {}).get("label", None) if experiment_phentypic_assay_mechanism else None,
+                            "experiment_phentypic_assay_mechanism_description": experiment_phentypic_assay_mechanism.get("description", None) if experiment_phentypic_assay_mechanism else None,
+                            "experiment_molecular_mechanism_assessed_label": experiment_molecular_mechanism_assessed.get("keyword", {}).get("label", None) if experiment_molecular_mechanism_assessed else None,
+                            "experiment_molecular_mechanism_assessed_description": experiment_molecular_mechanism_assessed.get("description", None) if experiment_molecular_mechanism_assessed else None,
+                            "experiment_phenotypic_assay_model_system_label": experiment_phenotypic_assay_model_system.get("keyword", {}).get("label", None) if experiment_phenotypic_assay_model_system else None,
+                            "experiment_phenotypic_assay_model_system_description": experiment_phenotypic_assay_model_system.get("description", None) if experiment_phenotypic_assay_model_system else None,
+                            "experiment_phenotypic_assay_profiling_strategy_label": experiment_phenotypic_assay_profiling_strategy.get("keyword", {}).get("label", None) if experiment_phenotypic_assay_profiling_strategy else None,
+                            "experiment_phenotypic_assay_profiling_strategy_description": experiment_phenotypic_assay_profiling_strategy.get("description", None) if experiment_phenotypic_assay_profiling_strategy else None,
+                            "experiment_phenotypic_assay_sequencing_read_type_label": experiment_phenotypic_assay_sequencing_read_type.get("keyword", {}).get("label", None) if experiment_phenotypic_assay_sequencing_read_type else None,
+                            "experiment_phenotypic_assay_sequencing_read_type_description": experiment_phenotypic_assay_sequencing_read_type.get("description", None) if experiment_phenotypic_assay_sequencing_read_type else None,
+
+                            "experiment_detects_nmd_variants": experiment_detects_nmd_variants,
+                            "experiment_detects_splicing_variants": experiment_detects_splicing_variants,
                         })
 
     with open(output_csv, mode='w', newline='') as outfile:
         fieldnames = [
             "hgvs",
             "clingen_allele_id",
-            "mavedb_variant_urn",
-            "mavedb_score_set_urn",
+            "variant_urn",
             "score",
             "score_data",
             "count_data",
+
+            "score_range_min",
+            "score_range_max",
             "score_range_label",
             "score_range_classification",
             "odds_path",
             "acmg_evidence_strength",
+
             "variant_effect_measurement_source_db",
             "variant_effect_measurement_source_identifier",
             "variant_effect_measurement_source_first_author",
@@ -157,6 +273,45 @@ def main(input_csv: str, output_csv: str):
             "calibration_source_identifier",
             "evidence_strength_source_db",
             "evidence_strength_source_identifier",
+
+            "score_set_urn",
+            "score_set_title",
+            "score_set_short_description",
+            "score_set_published_date",
+
+            "experiment_urn",
+            "experiment_title",
+            "experiment_short_description",
+            
+            "experiment_variant_library_creation_method_label",
+            "experiment_variant_library_creation_method_description",
+            "experiment_endogenous_locus_library_method_system_label",
+            "experiment_endogenous_locus_library_method_system_description",
+            "experiment_endogenous_locus_library_method_mechanism_label",
+            "experiment_endogenous_locus_library_method_mechanism_description",
+            "experiment_in_vitro_construct_library_method_system_label",
+            "experiment_in_vitro_construct_library_method_system_description",
+            "experiment_in_vitro_construct_library_method_mechanism_label",
+            "experiment_in_vitro_construct_library_method_mechanism_description",
+            "experiment_delivery_method_label",
+            "experiment_delivery_method_description",
+            "experiment_phenotypic_assay_dimensionality_label",
+            "experiment_phenotypic_assay_dimensionality_description",
+            "experiment_phenotypic_assay_method_label",
+            "experiment_phenotypic_assay_method_description",
+            "experiment_phentypic_assay_mechanism_label",
+            "experiment_phentypic_assay_mechanism_description",
+            "experiment_molecular_mechanism_assessed_label",
+            "experiment_molecular_mechanism_assessed_description",
+            "experiment_phenotypic_assay_model_system_label",
+            "experiment_phenotypic_assay_model_system_description",
+            "experiment_phenotypic_assay_profiling_strategy_label",
+            "experiment_phenotypic_assay_profiling_strategy_description",
+            "experiment_phenotypic_assay_sequencing_read_type_label",
+            "experiment_phenotypic_assay_sequencing_read_type_description",
+
+            "experiment_detects_nmd_variants",
+            "experiment_detects_splicing_variants",
         ]
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()

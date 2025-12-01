@@ -263,31 +263,32 @@ def main(input_csv: str, output_csv: str):
                     score_range_min: float | None = None
                     score_range_max: float | None = None
                     odds_path: float | None = None
+                    acmg_criterion: str | None = None
                     acmg_evidence_strength: str | None = None
                     calibration_source_db: str | None = None
                     calibration_source_identifier: str | None = None
+                    method_source_db: str | None = None
+                    method_source_identifier: str | None = None
                     evidence_strength_source_db: str | None = None
                     evidence_strength_source_identifier: str | None = None
 
                     if score is not None:
-                        # TODO The data model for calibrations will change in MaveDB v2025.5.0.
-                        calibrations = score_set.get("scoreCalibrations", {})
+                        calibrations = score_set.get("scoreCalibrations", [])
 
-                        # Get the primary calibration. MaveDB v2025.5.0 will tell us which one is primary, but for now
-                        # we prioritize Scott, CVFG (all variants), and investigator-provided calibrations, in that
-                        # order. If a primary calibration is flagged for research use only, ignore it.
-                        primary_calibration = calibrations.get(
-                            "scottCalibration",
-                            calibrations.get(
-                                "cvfgAllVariants",
-                                calibrations.get("investigatorProvided", None),
+                        primary_calibration = next(
+                            (
+                                calibration
+                                for calibration in calibrations
+                                if calibration.get("primary", False)
+                                and not calibration.get("researchUseOnly", False)
                             ),
+                            None,
                         )
-                        if primary_calibration.get("researchUseOnly", False):
-                            primary_calibration = None
 
                         if primary_calibration:
-                            for range in primary_calibration.get("ranges", []):
+                            for range in primary_calibration.get(
+                                "functionalRanges", []
+                            ):
                                 if score_lies_in_range(score, range):
                                     score_range_label = cast(
                                         str | None, range.get("label", None)
@@ -305,14 +306,22 @@ def main(input_csv: str, output_csv: str):
                                     )
                                     odds_path = cast(
                                         float | None,
-                                        range.get("oddsPath", {}).get("ratio", None),
+                                        range.get("oddspaths_ratio", None),
+                                    )
+                                    acmg_criterion = cast(
+                                        str | None,
+                                        range.get("acmg_classification", {}).get(
+                                            "criterion", None
+                                        ),
                                     )
                                     acmg_evidence_strength = cast(
                                         str | None,
-                                        range.get("oddsPath", {}).get("evidence", None),
+                                        range.get("acmg_classification", {}).get(
+                                            "evidence_strength", None
+                                        ),
                                     )
                                     calibration_sources = primary_calibration.get(
-                                        "source", []
+                                        "threshold_sources", []
                                     )
                                     calibration_source = (
                                         calibration_sources[0]
@@ -325,47 +334,66 @@ def main(input_csv: str, output_csv: str):
                                     calibration_source_identifier = (
                                         calibration_source.get("identifier", None)
                                     )
-                                    odds_path_sources = primary_calibration.get(
-                                        "odssPathSource", []
+                                    method_sources = primary_calibration.get(
+                                        "method_sources", []
                                     )
-                                    odds_path_source = (
-                                        odds_path_sources[0]
-                                        if odds_path_sources
+                                    method_source = (
+                                        method_sources[0] if method_sources else {}
+                                    )
+                                    method_source_db = method_source.get("dbName", None)
+                                    method_source_identifier = method_source.get(
+                                        "identifier", None
+                                    )
+                                    evidence_strength_sources = primary_calibration.get(
+                                        "classification_sources", []
+                                    )
+                                    classification_source = (
+                                        evidence_strength_sources[0]
+                                        if evidence_strength_sources
                                         else {}
                                     )
-                                    evidence_strength_source_db = odds_path_source.get(
-                                        "dbName", None
+                                    evidence_strength_source_db = (
+                                        classification_source.get("dbName", None)
                                     )
                                     evidence_strength_source_identifier = (
-                                        odds_path_source.get("identifier", None)
+                                        classification_source.get("identifier", None)
                                     )
                                     break
 
                         results.append(
                             {
+                                # Variant identifiers
                                 "hgvs": hgvs,
                                 "clingen_allele_id": clingen_allele_id,
                                 "variant_urn": variant_urn,
+                                # Variant effect measurement data
                                 "score": score,
                                 "score_data": json.dumps(score_data),
                                 "count_data": json.dumps(count_data)
                                 if count_data
                                 else None,
+                                # Calibration data
                                 "score_range_label": score_range_label,
                                 "score_range_classification": score_range_classification,
                                 "score_range_min": score_range_min,
                                 "score_range_max": score_range_max,
                                 "odds_path": odds_path,
+                                "acmg_criterion": acmg_criterion,
                                 "acmg_evidence_strength": acmg_evidence_strength,
+                                # Source publication data
                                 "variant_effect_measurement_source_db": variant_effect_measurement_source_db,
                                 "variant_effect_measurement_source_identifier": variant_effect_measurement_source_identifier,
                                 "variant_effect_measurement_source_first_author": variant_effect_measurement_source_first_author_name,
                                 "variant_effect_measurement_source_publication_year": variant_effect_measurement_source_publication_year,
                                 "variant_effect_measurement_source_publication_journal": variant_effect_measurement_source_publication_journal,
+                                # Calibration source data
                                 "calibration_source_db": calibration_source_db,
                                 "calibration_source_identifier": calibration_source_identifier,
+                                "method_source_db": method_source_db,
+                                "method_source_identifier": method_source_identifier,
                                 "evidence_strength_source_db": evidence_strength_source_db,
                                 "evidence_strength_source_identifier": evidence_strength_source_identifier,
+                                # Score set and experiment metadata
                                 "score_set_urn": score_set_urn,
                                 "score_set_title": score_set.get("title", None),
                                 "score_set_short_description": score_set.get(
@@ -528,6 +556,7 @@ def main(input_csv: str, output_csv: str):
             "score_range_label",
             "score_range_classification",
             "odds_path",
+            "acmg_criterion",
             "acmg_evidence_strength",
             "variant_effect_measurement_source_db",
             "variant_effect_measurement_source_identifier",
@@ -536,6 +565,8 @@ def main(input_csv: str, output_csv: str):
             "variant_effect_measurement_source_publication_journal",
             "calibration_source_db",
             "calibration_source_identifier",
+            "method_source_db",
+            "method_source_identifier",
             "evidence_strength_source_db",
             "evidence_strength_source_identifier",
             "score_set_urn",

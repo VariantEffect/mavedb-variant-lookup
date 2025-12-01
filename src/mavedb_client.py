@@ -1,6 +1,7 @@
 import requests
 
 
+# TODO: Use mavedb Python package with view models after https://github.com/VariantEffect/mavedb-api/issues/597.
 class MaveDBClient:
     def __init__(self, base_url="https://api.mavedb.org/api/v1"):
         self.base_url = base_url

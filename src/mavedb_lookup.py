@@ -115,7 +115,8 @@ def main(input_csv: str, output_csv: str):
             )
 
             if not clingen_allele_ids:
-                raise (Exception(f"No allele ID for {hgvs}"))
+                print(f"Warning: No allele ID found for {hgvs}")
+                continue
             for clingen_allele_id in clingen_allele_ids:
                 variant_effect_measurements = (
                     mavedb_client.fetch_variant_effect_measurements(clingen_allele_id)

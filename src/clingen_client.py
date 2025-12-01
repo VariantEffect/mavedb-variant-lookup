@@ -1,8 +1,8 @@
-import json
 from typing import Any
 from urllib.parse import quote
 
 import requests
+
 
 class ClingenClient:
     def __init__(self, base_url="https://reg.clinicalgenome.org"):
@@ -35,6 +35,6 @@ class ClingenClient:
         for allele in alleles:
             allele_id = allele.get("@id")
             if allele_id is not None:
-                allele_id = str(allele_id).split('/')[-1]
-                allele_ids.append(allele_id)    
+                allele_id = str(allele_id).split("/")[-1]
+                allele_ids.append(allele_id)
         return allele_ids

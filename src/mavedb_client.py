@@ -1,5 +1,5 @@
 import requests
-from urllib.parse import quote
+
 
 class MaveDBClient:
     def __init__(self, base_url="https://api.mavedb.org/api/v1"):
@@ -28,4 +28,6 @@ class MaveDBClient:
         first_variant = variants[0]
         if not isinstance(first_variant, dict):
             raise TypeError("Expected first array element to be an object")
-        return (first_variant.get("exactMatch", {}) or {}).get("variantEffectMeasurements", [])
+        return (first_variant.get("exactMatch", {}) or {}).get(
+            "variantEffectMeasurements", []
+        )
